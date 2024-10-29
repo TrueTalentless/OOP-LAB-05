@@ -13,6 +13,10 @@ class InvalidSelectionException extends Exception {
     }
 }
 
+/**
+ * @author Лебедев Игнат 3312
+ * @version 1.0
+ */
 public class Main {
     private JFrame mainFrame;
     private DefaultTableModel tableModel;
@@ -54,16 +58,17 @@ public class Main {
         String[] columns = {"Кличка", "Порода", "Владелец", "Судья", "Награды"};
         tableModel = new DefaultTableModel(columns, 0);
         dataTable = new JTable(tableModel);
+        dataTable.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION); // Позволяем множественный выбор строк
         JScrollPane scrollPane = new JScrollPane(dataTable);
 
         mainPanel.add(scrollPane, BorderLayout.CENTER);
 
-        // Элементы для поиска
+        // Панель поиска
+        JPanel searchPanel = new JPanel();
+        searchCriteriaComboBox = new JComboBox<>(new String[]{"По кличке", "По породе", "По владельцу", "По судье", "По награде"});
         searchField = new JTextField(15);
-        searchCriteriaComboBox = new JComboBox<>(new String[]{"По породе", "По владельцу", "По судье"});
         JButton searchButton = new JButton("Поиск");
 
-        JPanel searchPanel = new JPanel();
         searchPanel.add(searchCriteriaComboBox);
         searchPanel.add(searchField);
         searchPanel.add(searchButton);
@@ -71,18 +76,40 @@ public class Main {
         mainPanel.add(searchPanel, BorderLayout.SOUTH);
         mainFrame.add(mainPanel);
 
+        // Логика для кнопки "Поиск"
+        searchButton.addActionListener(e -> performSearch());
+
         // Логика для кнопки "Добавить"
         addDogButton.addActionListener(e -> {
-            tableModel.addRow(new Object[]{"Новая собака", "Неизвестная порода", "Новый владелец", "Новый судья", "Нет наград"});
-            unsavedChanges = true;
-            JOptionPane.showMessageDialog(mainFrame, "Добавлена новая собака");
+            DogEntryDialog dialog = new DogEntryDialog(mainFrame, "Добавить собаку", null);
+            dialog.setVisible(true);
+            String[] newData = dialog.getDogData();
+            if (newData != null) {
+                tableModel.addRow(newData);
+                unsavedChanges = true;
+                JOptionPane.showMessageDialog(mainFrame, "Добавлена новая собака");
+            }
         });
 
         // Логика для кнопки "Изменить"
         editDogButton.addActionListener(e -> {
             try {
                 validateSelectionForEdit(dataTable);
-                JOptionPane.showMessageDialog(mainFrame, "Информация изменена");
+                int selectedRow = dataTable.getSelectedRow();
+                String[] currentData = new String[tableModel.getColumnCount()];
+                for (int i = 0; i < tableModel.getColumnCount(); i++) {
+                    currentData[i] = (String) tableModel.getValueAt(selectedRow, i);
+                }
+                DogEntryDialog dialog = new DogEntryDialog(mainFrame, "Изменить собаку", currentData);
+                dialog.setVisible(true);
+                String[] updatedData = dialog.getDogData();
+                if (updatedData != null) {
+                    for (int i = 0; i < updatedData.length; i++) {
+                        tableModel.setValueAt(updatedData[i], selectedRow, i);
+                    }
+                    unsavedChanges = true;
+                    JOptionPane.showMessageDialog(mainFrame, "Информация изменена");
+                }
             } catch (InvalidSelectionException ex) {
                 JOptionPane.showMessageDialog(mainFrame, ex.getMessage());
             }
@@ -92,10 +119,19 @@ public class Main {
         deleteDogButton.addActionListener(e -> {
             try {
                 validateSelection(dataTable);
-                int selectedRow = dataTable.getSelectedRow();
-                tableModel.removeRow(selectedRow);
+                int[] selectedRows = dataTable.getSelectedRows();
+
+                if (selectedRows.length == 0) {
+                    throw new InvalidSelectionException("Не выбраны строки для удаления.");
+                }
+
+                // Удаляем выбранные строки, начиная с конца, чтобы не нарушить индексы
+                for (int i = selectedRows.length - 1; i >= 0; i--) {
+                    tableModel.removeRow(selectedRows[i]);
+                }
                 unsavedChanges = true;
-                JOptionPane.showMessageDialog(mainFrame, "Запись удалена");
+                JOptionPane.showMessageDialog(mainFrame, "Выбранные записи удалены");
+
             } catch (InvalidSelectionException ex) {
                 JOptionPane.showMessageDialog(mainFrame, ex.getMessage());
             }
@@ -129,10 +165,38 @@ public class Main {
     }
 
     /**
+     * Выполняет поиск по выбранному критерию и подсвечивает все строки с совпадениями.
+     */
+    private void performSearch() {
+        String searchText = searchField.getText().trim().toLowerCase();
+        if (searchText.isEmpty()) {
+            JOptionPane.showMessageDialog(mainFrame, "Введите текст для поиска.");
+            return;
+        }
+
+        int searchColumn = searchCriteriaComboBox.getSelectedIndex();
+        dataTable.clearSelection(); // Снимаем выделение перед поиском
+
+        boolean found = false;
+        for (int i = 0; i < tableModel.getRowCount(); i++) {
+            String cellValue = tableModel.getValueAt(i, searchColumn).toString().toLowerCase();
+            if (cellValue.contains(searchText)) {
+                dataTable.addRowSelectionInterval(i, i); // Подсвечиваем строку
+                found = true;
+            }
+        }
+
+        if (!found) {
+            JOptionPane.showMessageDialog(mainFrame, "Совпадения не найдены.");
+        }
+    }
+
+    /**
      * Метод для загрузки данных из файла в таблицу.
      */
     private void loadDataFromFile() {
         JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setCurrentDirectory(new File(System.getProperty("user.dir")));
         int result = fileChooser.showOpenDialog(mainFrame);
 
         if (result == JFileChooser.APPROVE_OPTION) {
@@ -141,7 +205,7 @@ public class Main {
                 tableModel.setRowCount(0); // Очистка таблицы перед загрузкой данных
                 String line;
                 while ((line = reader.readLine()) != null) {
-                    String[] rowData = line.split(";"); // Разделение данных запятыми
+                    String[] rowData = line.split(";");
                     tableModel.addRow(rowData);
                 }
                 unsavedChanges = true;
@@ -158,6 +222,7 @@ public class Main {
      */
     private void saveDataToFile() {
         JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setCurrentDirectory(new File(System.getProperty("user.dir")));
         int result = fileChooser.showSaveDialog(mainFrame);
 
         if (result == JFileChooser.APPROVE_OPTION) {
@@ -186,8 +251,8 @@ public class Main {
      * @throws InvalidSelectionException если строка не выбрана
      */
     private void validateSelection(JTable table) throws InvalidSelectionException {
-        if (table.getSelectedRow() == -1) {
-            throw new InvalidSelectionException("Не выбрана строка для удаления.");
+        if (table.getSelectedRowCount() == 0) {
+            throw new InvalidSelectionException("Не выбраны строки для удаления.");
         }
     }
 
@@ -201,6 +266,131 @@ public class Main {
         }
     }
 
+    /**
+     * Диалоговое окно для добавления или редактирования записи о собаке.
+     */
+    private static class DogEntryDialog extends JDialog {
+        private JTextField nameField, breedField, ownerField, judgeField, awardField;
+        private String[] dogData;
+
+        public DogEntryDialog(JFrame parent, String title, String[] currentData) {
+            super(parent, title, true);
+            setLayout(new GridBagLayout());
+            GridBagConstraints gbc = new GridBagConstraints();
+            gbc.insets = new Insets(5, 5, 5, 5);
+
+            Dimension fieldSize = new Dimension(200, 25);
+
+            gbc.gridx = 0;
+            gbc.gridy = 0;
+            gbc.anchor = GridBagConstraints.EAST;
+            add(new JLabel("Кличка:"), gbc);
+            nameField = new JTextField(currentData == null ? "" : currentData[0]);
+            nameField.setPreferredSize(fieldSize);
+            gbc.gridx = 1;
+            gbc.anchor = GridBagConstraints.WEST;
+            add(nameField, gbc);
+
+            gbc.gridx = 0;
+            gbc.gridy = 1;
+            gbc.anchor = GridBagConstraints.EAST;
+            add(new JLabel("Порода:"), gbc);
+            breedField = new JTextField(currentData == null ? "" : currentData[1]);
+            breedField.setPreferredSize(fieldSize);
+            gbc.gridx = 1;
+            gbc.anchor = GridBagConstraints.WEST;
+            add(breedField, gbc);
+
+            gbc.gridx = 0;
+            gbc.gridy = 2;
+            gbc.anchor = GridBagConstraints.EAST;
+            add(new JLabel("Владелец:"), gbc);
+            ownerField = new JTextField(currentData == null ? "" : currentData[2]);
+            ownerField.setPreferredSize(fieldSize);
+            gbc.gridx = 1;
+            gbc.anchor = GridBagConstraints.WEST;
+            add(ownerField, gbc);
+
+            gbc.gridx = 0;
+            gbc.gridy = 3;
+            gbc.anchor = GridBagConstraints.EAST;
+            add(new JLabel("Судья:"), gbc);
+            judgeField = new JTextField(currentData == null ? "" : currentData[3]);
+            judgeField.setPreferredSize(fieldSize);
+            gbc.gridx = 1;
+            gbc.anchor = GridBagConstraints.WEST;
+            add(judgeField, gbc);
+
+            gbc.gridx = 0;
+            gbc.gridy = 4;
+            gbc.anchor = GridBagConstraints.EAST;
+            add(new JLabel("Награды:"), gbc);
+            awardField = new JTextField(currentData == null ? "" : currentData[4]);
+            awardField.setPreferredSize(fieldSize);
+            gbc.gridx = 1;
+            gbc.anchor = GridBagConstraints.WEST;
+            add(awardField, gbc);
+
+            // Центральное расположение кнопок "OK" и "Отмена"
+            JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
+            JButton confirmButton = new JButton("OK");
+            confirmButton.setPreferredSize(new Dimension(80, 30));
+            JButton cancelButton = new JButton("Отмена");
+            cancelButton.setPreferredSize(new Dimension(80, 30));
+            buttonPanel.add(confirmButton);
+            buttonPanel.add(cancelButton);
+
+            gbc.gridx = 0;
+            gbc.gridy = 5;
+            gbc.gridwidth = 2;
+            gbc.anchor = GridBagConstraints.CENTER;
+            add(buttonPanel, gbc);
+
+            confirmButton.addActionListener(e -> onSave());
+            cancelButton.addActionListener(e -> onCancel());
+
+            setSize(400, 300);
+            setLocationRelativeTo(parent);
+        }
+
+        private void onSave() {
+            if (nameField.getText().isEmpty() || breedField.getText().isEmpty() ||
+                    ownerField.getText().isEmpty() || judgeField.getText().isEmpty() ||
+                    awardField.getText().isEmpty()) {
+                JOptionPane.showMessageDialog(this, "Все поля должны быть заполнены.");
+            } else {
+                dogData = new String[]{
+                        nameField.getText(),
+                        breedField.getText(),
+                        ownerField.getText(),
+                        judgeField.getText(),
+                        awardField.getText()
+                };
+                setVisible(false);
+            }
+        }
+
+        /**
+         * Отменяет операцию и скрывает форму.
+         */
+        private void onCancel() {
+            dogData = null;
+            setVisible(false);
+        }
+
+        /**
+         * Возвращает данные собаки.
+         * @return массив строк с данными собаки или null, если данных нет.
+         */
+        public String[] getDogData() {
+            return dogData;
+        }
+    }
+
+    /**
+     * Главный метод для запуска приложения.
+     * @param args аргументы командной строки
+     */
     public static void main(String[] args) {
         new Main().show();
     }
